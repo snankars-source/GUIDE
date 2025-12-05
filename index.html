@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paragraf Paylaşım Uygulaması</title>
+    <!-- Tailwind CSS (Estetik için) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React ve Babel (JSX'i tarayıcıda çalıştırmak için) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons'u CDN üzerinden yükleyin -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Genel stil ayarlamaları */
+        body { font-family: 'Inter', sans-serif; background-color: #f9fafb; margin: 0; padding: 0; }
+        #root { min-height: 100vh; display: flex; flex-direction: column; }
+        /* Mobil cihazlar için daha iyi görünümler */
+        .max-w-4xl { max-width: 95%; }
+        /* Alt menü çubuğu gölgesini mobil uygulamaya benzetir */
+        footer { box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -2px rgba(0, 0, 0, 0.06); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // Firebase imports (React kodunun içinde tanımlanmıştır)
+        const { useState, useEffect, useCallback, useMemo } = React;
+        const { initializeApp } = firebase;
+        const { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = firebase.auth;
+        const { getFirestore, collection, query, where, orderBy, limit, onSnapshot, addDoc, serverTimestamp } = firebase.firestore;
+        
+        // Lucide ikonlarını React componentleri olarak kullanabilmek için mock'layalım
+        const Users = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M18 8h6"/><path d="M21 11v-6"/></svg>;
+        const BookOpen = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s4-10 14-4V5c-4.4-1.2-12 1.4-12 7c0 5.6 7.6 8.2 12 7.4v-3.4c-8.4 0-14-3.4-14-6"/></svg>;
+        const Send = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 19-3-9-9-3 19-7z"/></svg>;
+        const User = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+        const Loader2 = (props) => <svg {...props} className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
+        const Camera = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>;
+        const X = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>;
+
+
+        // NOT: Orijinal App.jsx içeriği, Firebase v9 syntax'ı ile buraya taşınmıştır.
+        // --- Yardımcı Fonksiyonlar (Arayüzde kullanılmasalar da tutulur) ---
+
+        const base64ToArrayBuffer = (base64) => {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        };
+
+        const pcmToWav = (pcmData, sampleRate) => {
+            const buffer = new ArrayBuffer(44 + pcmData.length * 2);
+            const view = new DataView(buffer);
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + pcmData.length * 2, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, pcmData.length * 2, true);
+
+            let offset = 44;
+            for (let i = 0; i < pcmData.length; i++) {
+                view.setInt16(offset, pcmData[i], true);
+                offset += 2;
+            }
+            return new Blob([view], { type: 'audio/wav' });
+        };
+
+        const writeString = (view, offset, string) => {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        };
+
+        // --- Ana Bileşen ---
+
+        const App = () => {
+            const [firebaseReady, setFirebaseReady] = useState(false);
+            const [db, setDb] = useState(null);
+            const [auth, setAuth] = useState(null);
+            const [userId, setUserId] = useState(null);
+            const [userName, setUserName] = useState("Kullanıcı");
+            const [viewMode, setViewMode] = useState('mine'); // 'mine' (Kitaplarım) veya 'social' (Vitrin)
+            const [isPostingFormOpen, setIsPostingFormOpen] = useState(false); // Yeni form durumu
+            const [myPosts, setMyPosts] = useState([]);
+            const [socialPosts, setSocialPosts] = useState([]);
+            const [newPostText, setNewPostText] = useState('');
+            const [isPosting, setIsPosting] = useState(false);
+            const [errorMessage, setErrorMessage] = useState('');
+
+            // 1. Firebase Başlatma ve Kimlik Doğrulama
+            useEffect(() => {
+                try {
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+                    if (!db) {
+                        const app = initializeApp(firebaseConfig);
+                        const firestore = getFirestore(app);
+                        const authentication = getAuth(app);
+                        setDb(firestore);
+                        setAuth(authentication);
+
+                        const unsubscribe = onAuthStateChanged(authentication, async (user) => {
+                            if (user) {
+                                setUserId(user.uid);
+                                setUserName(`Kullanıcı-${user.uid.substring(0, 8)}`);
+                            } else {
+                                try {
+                                    if (typeof __initial_auth_token !== 'undefined') {
+                                        await signInWithCustomToken(authentication, __initial_auth_token);
+                                    } else {
+                                        await signInAnonymously(authentication);
+                                    }
+                                } catch (error) {
+                                    console.error("Firebase Auth hatası:", error);
+                                    setUserId(crypto.randomUUID());
+                                    setUserName("Anonim Kullanıcı");
+                                }
+                            }
+                            setFirebaseReady(true);
+                        });
+
+                        return () => unsubscribe();
+                    }
+                } catch (e) {
+                    console.error("Firebase kurulumunda hata:", e);
+                    setErrorMessage("Veritabanı bağlantısı kurulamadı. Lütfen konsolu kontrol edin.");
+                }
+            }, [db]);
+
+            // Firestore koleksiyon referansı oluşturma
+            const getCollectionRef = useCallback((collectionName) => {
+                if (!db) return null;
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                return collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+            }, [db]);
+
+            // 2. Benim Paylaşımlarımı Çekme (Real-time)
+            useEffect(() => {
+                if (!db || !userId) return;
+
+                const postsRef = getCollectionRef('posts');
+                if (!postsRef) return;
+
+                const q = query(
+                    postsRef,
+                    where("userId", "==", userId),
+                    orderBy("timestamp", "desc"),
+                    limit(10)
+                );
+
+                const unsubscribe = onSnapshot(q, (snapshot) => {
+                    const posts = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data(),
+                        timestamp: doc.data().timestamp?.toDate()?.toLocaleDateString('tr-TR') || 'Yakın Zaman'
+                    }));
+                    setMyPosts(posts);
+                    setErrorMessage('');
+                }, (error) => {
+                    console.error("Benim Paylaşımlarım çekilirken hata:", error);
+                    // Sadece hata mesajını göster, kullanıcı arayüzünü bozma
+                });
+
+                return () => unsubscribe();
+            }, [db, userId, getCollectionRef]);
+
+            // 3. Sosyal Akışı Çekme (Real-time)
+            useEffect(() => {
+                if (!db || !userId || viewMode !== 'social') return;
+
+                const postsRef = getCollectionRef('posts');
+                if (!postsRef) return;
+
+                const q = query(
+                    postsRef,
+                    where("userId", "!=", userId),
+                    orderBy("timestamp", "desc"),
+                    limit(20)
+                );
+
+                const unsubscribe = onSnapshot(q, (snapshot) => {
+                    const posts = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data(),
+                        timestamp: doc.data().timestamp?.toDate()?.toLocaleDateString('tr-TR') || 'Yakın Zaman'
+                    }));
+                    setSocialPosts(posts);
+                    setErrorMessage('');
+                }, (error) => {
+                    console.error("Sosyal Paylaşımlar çekilirken hata:", error);
+                    // Sadece hata mesajını göster, kullanıcı arayüzünü bozma
+                });
+
+                return () => unsubscribe();
+            }, [db, userId, viewMode, getCollectionRef]);
+
+
+            // 4. Yeni Paragraf Paylaşma İşlevi (Mock Image Upload)
+            const handlePostSubmit = async (e) => {
+                e.preventDefault();
+                if (!newPostText.trim() || !userId || !db) {
+                    setErrorMessage('Lütfen bir paragraf metni girin.');
+                    return;
+                }
+
+                setIsPosting(true);
+                setErrorMessage('');
+
+                try {
+                    const postsRef = getCollectionRef('posts');
+                    if (!postsRef) throw new Error("Koleksiyon referansı bulunamadı.");
+
+                    // Mock Image URL'si oluşturma
+                    const placeholderText = encodeURIComponent(newPostText.trim().substring(0, 30));
+                    const imageUrl = `https://placehold.co/400x400/1e293b/f8fafc?text=${placeholderText}`;
+
+                    await addDoc(postsRef, {
+                        userId: userId,
+                        displayName: userName,
+                        caption: newPostText.trim(),
+                        imageUrl: imageUrl,
+                        timestamp: serverTimestamp()
+                    });
+
+                    setNewPostText('');
+                    setIsPostingFormOpen(false); // Paylaşım başarılı olunca formu kapat
+                    setViewMode('mine'); // Kendi paylaşımlarına dön
+                } catch (error) {
+                    console.error("Gönderi eklenirken hata:", error);
+                    setErrorMessage('Paragrafı paylaşırken bir sorun oluştu.');
+                } finally {
+                    setIsPosting(false);
+                }
+            };
+
+            // 5. Gönderi Kartı Bileşeni (Aynı kalır)
+            const PostCard = useMemo(() => ({ post }) => {
+                return (
+                    <div className="bg-white rounded-xl shadow-lg overflow-hidden transition-all duration-300 transform hover:shadow-xl hover:scale-[1.01] flex flex-col">
+                        {/* Görüntü alanı - Kare format için aspect-ratio: 1/1 */}
+                        <div className="aspect-square w-full">
+                            <img
+                                src={post.imageUrl}
+                                alt={post.caption}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                    e.target.onerror = null;
+                                    e.target.src = 'https://placehold.co/400x400/94a3b8/fff?text=Görsel+Yüklenemedi';
+                                }}
+                            />
+                        </div>
+                        {/* Metin ve Kullanıcı Bilgileri */}
+                        <div className="p-4 flex flex-col justify-between flex-grow">
+                            <div>
+                                <p className="text-gray-700 text-sm italic mb-2 line-clamp-3">{post.caption}</p>
+                            </div>
+                            <div className="mt-2 text-xs text-gray-500 flex justify-between items-center">
+                                <span className="font-medium text-indigo-600 flex items-center">
+                                    <User className="w-3 h-3 mr-1" />
+                                    {post.displayName}
+                                </span>
+                                <span>{post.timestamp}</span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }, []);
+
+            // 6. Mevcut Görünüme Göre İçeriği Seç
+            const currentPosts = viewMode === 'mine' ? myPosts : socialPosts;
+            const isMyView = viewMode === 'mine';
+            const postCount = currentPosts.length;
+            const isLoading = !firebaseReady;
+
+            // Alt menü çubuğundaki düğmeler için stil
+            const NavButton = ({ mode, icon: Icon, label, action }) => (
+                <button
+                    onClick={() => {
+                        action();
+                        setIsPostingFormOpen(false); // Menü butonu tıklanınca formu kapat
+                    }}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-colors duration-200 ${
+                        viewMode === mode ? 'text-indigo-600' : 'text-gray-500 hover:text-indigo-600'
+                    }`}
+                    disabled={isLoading}
+                >
+                    <Icon className="w-6 h-6" />
+                    <span className="text-xs mt-1">{label}</span>
+                </button>
+            );
+
+            // Merkezi büyük buton
+            const CentralButton = ({ action }) => (
+                <button
+                    onClick={action}
+                    className="w-14 h-14 bg-indigo-600 text-white rounded-full shadow-xl -mt-6 flex items-center justify-center border-4 border-white transition-all duration-300 transform hover:scale-105"
+                    disabled={isLoading}
+                >
+                    <Camera className="w-6 h-6" />
+                </button>
+            );
+
+            return (
+                <div className="min-h-screen bg-gray-50 font-sans antialiased flex flex-col pb-20"> {/* Alt menü için boşluk bırak */}
+                    {/* Hata Mesajı Alanı */}
+                    {errorMessage && (
+                        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 sticky top-0 z-50 transition-all duration-300" role="alert">
+                            <p className="font-bold">Hata</p>
+                            <p>{errorMessage}</p>
+                        </div>
+                    )}
+
+                    {/* Yeni Gönderi Formu (Sticky/Modal benzeri) */}
+                    <div className={`fixed top-0 left-0 right-0 z-30 bg-white shadow-xl transition-transform duration-300 ${isPostingFormOpen ? 'translate-y-0' : '-translate-y-full'}`}>
+                        <div className="max-w-4xl mx-auto p-4 border-b border-indigo-100">
+                            <div className="flex justify-between items-center mb-3">
+                                <h2 className="text-xl font-bold text-indigo-700">Paragraf Paylaş</h2>
+                                <button onClick={() => setIsPostingFormOpen(false)} className="text-gray-500 hover:text-gray-800">
+                                    <X className="w-6 h-6" />
+                                </button>
+                            </div>
+                            <form onSubmit={handlePostSubmit} className="flex flex-col sm:flex-row gap-2">
+                                <input
+                                    type="text"
+                                    value={newPostText}
+                                    onChange={(e) => setNewPostText(e.target.value)}
+                                    placeholder="Okuduğun paragrafı veya bir alıntıyı buraya yapıştır (maks 150 karakter)..."
+                                    className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                                    maxLength={150}
+                                    disabled={isPosting}
+                                />
+                                <button
+                                    type="submit"
+                                    className="bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-indigo-700 transition-colors duration-200 flex items-center justify-center disabled:bg-indigo-400 disabled:cursor-not-allowed"
+                                    disabled={isPosting}
+                                >
+                                    {isPosting ? (
+                                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                    ) : (
+                                        <Send className="w-4 h-4 mr-2" />
+                                    )}
+                                    Paylaş
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    {/* Ana İçerik */}
+                    <main className="flex-grow p-4 max-w-4xl mx-auto w-full pt-6">
+                        {isLoading && (
+                            <div className="text-center py-12 text-gray-500 flex flex-col items-center">
+                                <Loader2 className="w-8 h-8 animate-spin mb-3" />
+                                <p>Veriler yükleniyor ve kimlik doğrulaması bekleniyor...</p>
+                            </div>
+                        )}
+
+                        {firebaseReady && (
+                            <>
+                                {/* Gönderi Akışı Başlığı */}
+                                <h1 className="text-3xl font-extrabold text-gray-800 mb-4 pb-2">
+                                    {isMyView ? `Kitaplarım (${postCount})` : `Vitrin - Sosyal Akış (${postCount})`}
+                                </h1>
+                                <p className="text-sm text-gray-500 mb-4">
+                                    Kullanıcı: <span className="font-mono text-xs bg-gray-100 p-1 rounded">{userId}</span>
+                                </p>
+
+                                {/* Gönderi Listesi / Grid */}
+                                {postCount > 0 ? (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        {currentPosts.map((post) => (
+                                            <PostCard key={post.id} post={post} />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-16 text-gray-500 bg-white rounded-xl shadow-inner mt-8">
+                                        <p className="text-lg font-semibold">
+                                            {isMyView ? 'Henüz hiçbir paragraf paylaşmadınız. Merkezi kamera butonuna tıklayarak bir şeyler paylaşın!' : 'Sosyal akışta henüz paylaşım yok. İlk paylaşan siz olun!'}
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </main>
+
+                    {/* Alt Menü Çubuğu (Footer Nav Bar) */}
+                    <footer className="fixed bottom-0 left-0 right-0 bg-white shadow-2xl border-t border-gray-200 z-50">
+                        <div className="max-w-md mx-auto h-16 flex justify-around items-center px-4">
+                            <NavButton
+                                mode="mine"
+                                icon={BookOpen}
+                                label={userName}
+                                action={() => setViewMode('mine')}
+                            />
+
+                            {/* Kamera Butonu - Paylaşım Formunu açar */}
+                            <CentralButton
+                                action={() => {
+                                    // Formu aç ve görünümü 'mine' olarak ayarla
+                                    setIsPostingFormOpen(true);
+                                    setViewMode('mine');
+                                }}
+                            />
+
+                            <NavButton
+                                mode="social"
+                                icon={Users}
+                                label="Vitrin"
+                                action={() => setViewMode('social')}
+                            />
+                        </div>
+                    </footer>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+    <!-- Firebase SDK'larını yükleyin (V9 modül formatı) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, query, where, orderBy, limit, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Bu kütüphaneleri global window objesine ekleyelim, böylece yukarıdaki <script type="text/babel"> erişebilir.
+        window.firebase = {
+            initializeApp,
+            auth: { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged },
+            firestore: { getFirestore, collection, query, where, orderBy, limit, onSnapshot, addDoc, serverTimestamp }
+        };
+
+        // Otomatik başlatma
+        document.addEventListener('DOMContentLoaded', () => {
+            // Firestore ve Auth global olarak yüklendikten sonra React uygulaması çalışmaya başlar
+            console.log("Firebase kütüphaneleri yüklendi.");
+        });
+    </script>
